@@ -1,4 +1,6 @@
-# tv-home
+# Debloat Android TV using Windows
+
+*A Windows-friendly fork of [mihirgupta0900/tv-home](https://github.com/mihirgupta0900/tv-home).*
 
 **Make a slow, ad-filled Android TV fast and clean again.** Debloat it over Wi-Fi and give it a
 tiny Apple TV-style home screen with rotating nature wallpapers. You can hand the whole thing to
