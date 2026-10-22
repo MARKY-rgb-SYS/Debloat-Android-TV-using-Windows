@@ -41,6 +41,7 @@ for c in \
   "pm grant com.mihir.tvhome android.permission.READ_EXTERNAL_STORAGE" \
   "pm grant com.mihir.tvhome android.permission.READ_MEDIA_IMAGES" \
   "mkdir -p /sdcard/Pictures/Wallpapers" \
+  "settings put secure screensaver_components com.mihir.tvhome/.PhotoDream" \
   "cmd package set-home-activity --user 0 com.mihir.tvhome/.MainActivity" \
   "pm disable-user --user 0 $STOCK_LAUNCHER" \
   "pm disable-user --user 0 com.google.android.tungsten.setupwraith" \

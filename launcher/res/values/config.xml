@@ -45,6 +45,9 @@
     <!-- Minutes between slideshow photos. -->
     <integer name="wallpaper_minutes">1</integer>
 
+    <!-- Seconds between photos in the "Family photos" screensaver. -->
+    <integer name="screensaver_seconds">30</integer>
+
     <!-- Tiles per row in the grid. -->
     <integer name="columns">5</integer>
 </resources>

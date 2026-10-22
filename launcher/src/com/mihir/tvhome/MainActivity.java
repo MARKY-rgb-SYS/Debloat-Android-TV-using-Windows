@@ -15,10 +15,6 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
-import android.graphics.Matrix;
-import android.graphics.Paint;
-import android.graphics.RectF;
-import android.media.ExifInterface;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Typeface;
@@ -29,7 +25,6 @@ import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -48,7 +43,6 @@ import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.TextView;
 
-import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -224,7 +218,7 @@ public class MainActivity extends Activity {
         gridShade.setBackgroundColor(0xB3000000);
         gridShade.setAlpha(0f);
         root.addView(gridShade, new FrameLayout.LayoutParams(-1, -1));
-        wallpapers = listWallpapers();
+        wallpapers = Photos.list(this);
         // Shows when there are no photos at all: a quiet dark gradient instead of flat black.
         root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                 new int[]{0xFF1C2230, 0xFF10131A, 0xFF07080B}));
@@ -817,29 +811,6 @@ public class MainActivity extends Activity {
         return v;
     }
 
-    /** The photo folder on the TV. Anything in it replaces the bundled nature photos. */
-    static final File WALL_DIR = new File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Wallpapers");
-
-    /** Photos in the TV's Pictures/Wallpapers folder, sorted by name; the bundled ones if it has none. */
-    private String[] listWallpapers() {
-        List<String> found = new ArrayList<>();
-        File[] files = WALL_DIR.listFiles();
-        if (files != null) for (File f : files) {
-            String n = f.getName().toLowerCase(Locale.ROOT);
-            if (f.isFile() && !n.startsWith(".") && (n.endsWith(".jpg") || n.endsWith(".jpeg")
-                    || n.endsWith(".png") || n.endsWith(".webp") || n.endsWith(".heic"))) found.add(f.getPath());
-        }
-        if (found.isEmpty()) {
-            try {
-                String[] bundled = getAssets().list("wallpapers");
-                if (bundled != null) for (String n : bundled) found.add("asset:wallpapers/" + n);
-            } catch (java.io.IOException ignored) { }
-        }
-        Collections.sort(found);
-        return found.toArray(new String[0]);
-    }
-
     private void nextWallpaper() {
         stepWallpaper(1, false);
     }
@@ -852,7 +823,7 @@ public class MainActivity extends Activity {
      */
     private void stepWallpaper(int step, boolean manual) {
         handler.removeCallbacks(rotateWallpaper);
-        wallpapers = listWallpapers(); // pick up photos added to the folder since last time
+        wallpapers = Photos.list(this); // pick up photos added to the folder since last time
         if (wallpapers.length == 0) return;
         if (wallIndex < 0) wallIndex = getPreferences(MODE_PRIVATE).getInt("wallpaper", -1);
         int n = wallpapers.length;
@@ -866,73 +837,12 @@ public class MainActivity extends Activity {
         new Thread(() -> {
             Bitmap result = null;
             try {
-                result = loadWallpaper(path, sw, sh);
+                result = Photos.load(this, path, sw, sh);
             } catch (Exception | OutOfMemoryError ignored) { }
             Bitmap shown = result;
             runOnUiThread(() -> { if (seq == wallSeq) showWallpaper(shown, manual); });
         }).start();
         scheduleWallpaper(wallpaperIntervalMs);
-    }
-
-    private java.io.InputStream openWallpaper(String path) throws java.io.IOException {
-        return path.startsWith("asset:") ? getAssets().open(path.substring(6)) : new java.io.FileInputStream(path);
-    }
-
-    /**
-     * Decode a photo at roughly screen size (phone photos are 12+ MP; the TV has 1 GB), upright per its
-     * EXIF, and screen-shaped: a portrait or odd-shaped photo is shown whole over a blurred copy of itself.
-     */
-    private Bitmap loadWallpaper(String path, int sw, int sh) throws java.io.IOException {
-        BitmapFactory.Options o = new BitmapFactory.Options();
-        o.inJustDecodeBounds = true;
-        try (java.io.InputStream in = openWallpaper(path)) { BitmapFactory.decodeStream(in, null, o); }
-        if (o.outWidth <= 0 || o.outHeight <= 0) return null;
-        int rotation = 0;
-        try (java.io.InputStream in = openWallpaper(path)) {
-            switch (new ExifInterface(in).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
-                case ExifInterface.ORIENTATION_ROTATE_90: rotation = 90; break;
-                case ExifInterface.ORIENTATION_ROTATE_180: rotation = 180; break;
-                case ExifInterface.ORIENTATION_ROTATE_270: rotation = 270; break;
-                default: break;
-            }
-        } catch (Exception ignored) { } // no or unreadable EXIF: show as stored
-        boolean sideways = rotation == 90 || rotation == 270;
-        int w = sideways ? o.outHeight : o.outWidth, h = sideways ? o.outWidth : o.outHeight;
-        int sample = 1;
-        while (w / (sample * 2) >= sw && h / (sample * 2) >= sh) sample *= 2;
-        BitmapFactory.Options d = new BitmapFactory.Options();
-        d.inSampleSize = sample;
-        d.inPreferredConfig = Bitmap.Config.RGB_565;
-        Bitmap bm;
-        try (java.io.InputStream in = openWallpaper(path)) { bm = BitmapFactory.decodeStream(in, null, d); }
-        if (bm == null) return null;
-        if (rotation != 0) {
-            Matrix m = new Matrix();
-            m.postRotate(rotation);
-            Bitmap r = Bitmap.createBitmap(bm, 0, 0, bm.getWidth(), bm.getHeight(), m, true);
-            if (r != bm) bm.recycle();
-            bm = r;
-        }
-        float photo = (float) bm.getWidth() / bm.getHeight(), screen = (float) sw / sh;
-        if (Math.abs(photo - screen) / screen < 0.2f) return bm; // close enough: CENTER_CROP fills the screen
-
-        Bitmap out = Bitmap.createBitmap(sw, sh, Bitmap.Config.RGB_565);
-        Canvas c = new Canvas(out);
-        Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
-        // Background: the same photo, cover-scaled, blurred by shrinking it to a few dozen pixels, darkened.
-        float cover = Math.max((float) sw / bm.getWidth(), (float) sh / bm.getHeight());
-        int tw = Math.max(1, bm.getWidth() / 40), th = Math.max(1, bm.getHeight() / 40);
-        Bitmap tiny = Bitmap.createScaledBitmap(bm, tw, th, true);
-        float bw = bm.getWidth() * cover, bh = bm.getHeight() * cover;
-        c.drawBitmap(tiny, null, new RectF((sw - bw) / 2, (sh - bh) / 2, (sw + bw) / 2, (sh + bh) / 2), p);
-        tiny.recycle();
-        c.drawColor(0x73000000);
-        // Foreground: the whole photo, fitted.
-        float fit = Math.min((float) sw / bm.getWidth(), (float) sh / bm.getHeight());
-        float fw = bm.getWidth() * fit, fh = bm.getHeight() * fit;
-        c.drawBitmap(bm, null, new RectF((sw - fw) / 2, (sh - fh) / 2, (sw + fw) / 2, (sh + fh) / 2), p);
-        bm.recycle();
-        return out;
     }
 
     private void showWallpaper(Bitmap bm, boolean fast) {

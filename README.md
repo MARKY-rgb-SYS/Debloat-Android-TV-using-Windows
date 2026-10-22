@@ -68,6 +68,9 @@ Extras in this version of the launcher:
 - **Your own photos.** The slideshow plays whatever is in `Pictures/Wallpapers` on the TV (falls back to the
   bundled nature photos). Phone photos are downscaled, turned upright from EXIF, and portrait shots are shown
   whole over a blurred copy. Interval in `config.xml` (`wallpaper_minutes`, default 1).
+- **"Family photos" screensaver** with the same photos: full screen, slow zoom, a clock that swaps corners
+  so nothing burns in (`screensaver_seconds`, default 30). The install script selects it; `restore-tv.cmd`
+  puts Google's Ambient mode back.
 - **‹ › photo arrows**: Left from the first dock app or Right from the last; rewind/fast-forward keys work too.
 - **Clean up** pill: force-stops background apps (Stremio's server, etc.) except the `cleanup_keep` list and
   anything playing audio. Android 14 doesn't let apps do this, so the launcher talks to the TV's own ADB on

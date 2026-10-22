@@ -38,6 +38,8 @@ foreach ($p in $toEnable) {
 }
 
 Adb @("shell", "cmd", "package", "set-home-activity", "--user", "0", $stockHome) | Out-Host
+# Screensaver back to the TV's default (Google's Ambient mode).
+Adb @("shell", "settings", "delete", "secure", "screensaver_components") | Out-Null
 if ($RemoveLauncher) { Adb @("uninstall", "com.mihir.tvhome") | Out-Host }
 Adb @("shell", "am", "force-stop", "com.android.tv.settings") | Out-Null
 Adb @("shell", "input", "keyevent", "KEYCODE_HOME") | Out-Null
