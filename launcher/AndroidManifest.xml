@@ -9,6 +9,12 @@
     <!-- Android 11 only reveals the Wi-Fi name to apps holding location; granted over ADB at install. -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
+    <!-- Slideshow photos from the TV's Pictures/Wallpapers folder. Granted over ADB at install. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+
+    <!-- "Clean up" pill: talks to the TV's own ADB on 127.0.0.1 only. Nothing leaves the TV. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
@@ -19,6 +25,9 @@
         </intent>
         <package android:name="com.tcl.tv" />
         <package android:name="com.tcl.suspension" />
+        <package android:name="com.mitv.livetv" />
+        <package android:name="com.android.tv.settings" />
+        <package android:name="com.google.android.apps.tv.dreamx" />
     </queries>
 
     <application

@@ -6,6 +6,9 @@ launcher/debug.keystore
 backup/
 shots/
 
+# Google's adb.exe (download it yourself: platform-tools for Windows)
+platform-tools/
+
 # Build output
 launcher/build/
 .DS_Store

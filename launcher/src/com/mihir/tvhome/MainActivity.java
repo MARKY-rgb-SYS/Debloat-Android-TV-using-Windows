@@ -3,6 +3,7 @@ package com.mihir.tvhome;
 import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.app.ActivityManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -14,6 +15,10 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.graphics.Matrix;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.media.ExifInterface;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Typeface;
@@ -24,6 +29,7 @@ import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -42,6 +48,7 @@ import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.TextView;
 
+import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -92,7 +99,7 @@ public class MainActivity extends Activity {
     private long wallChangedAt;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable rotateWallpaper = this::nextWallpaper;
-    static final long WALLPAPER_INTERVAL_MS = 10 * 60 * 1000;
+    private long wallpaperIntervalMs; // from config.xml wallpaper_minutes
     private TextView greeting, clock, ampm, date, title, wifiPill, appsLabel;
     private int glowColor = 0xFF3A3A3A;
     private ValueAnimator glowAnim;
@@ -113,6 +120,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        wallpaperIntervalMs = getResources().getInteger(R.integer.wallpaper_minutes) * 60_000L;
         dockApps = getResources().getStringArray(R.array.dock_apps);
         hidden.addAll(Arrays.asList(getResources().getStringArray(R.array.hidden_apps)));
         hidden.add(getPackageName());
@@ -150,8 +158,21 @@ public class MainActivity extends Activity {
         if (getPackageManager().getChangedPackages(packageSeq) != null) buildApps();
         if (firstShow) { firstShow = false; playEntrance(); }
         // New photo on return if the current one has been up for the full interval.
-        if (wallIndex < 0 || SystemClock.elapsedRealtime() - wallChangedAt >= WALLPAPER_INTERVAL_MS) nextWallpaper();
-        else scheduleWallpaper(WALLPAPER_INTERVAL_MS - (SystemClock.elapsedRealtime() - wallChangedAt));
+        if (wallIndex < 0 || SystemClock.elapsedRealtime() - wallChangedAt >= wallpaperIntervalMs) nextWallpaper();
+        else scheduleWallpaper(wallpaperIntervalMs - (SystemClock.elapsedRealtime() - wallChangedAt));
+    }
+
+    private boolean windowFocusedOnce;
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        // At boot the window gets focus after onResume and Android puts it on the first pill (Inputs);
+        // nobody can have navigated there yet, so move it to the first dock app.
+        if (!hasFocus || windowFocusedOnce) return;
+        windowFocusedOnce = true;
+        View f = getCurrentFocus();
+        if ((f == null || pills.contains(f)) && !dockCards.isEmpty()) dockCards.get(0).requestFocus();
     }
 
     @Override
@@ -203,9 +224,10 @@ public class MainActivity extends Activity {
         gridShade.setBackgroundColor(0xB3000000);
         gridShade.setAlpha(0f);
         root.addView(gridShade, new FrameLayout.LayoutParams(-1, -1));
-        try {
-            wallpapers = getAssets().list("wallpapers");
-        } catch (java.io.IOException ignored) { }
+        wallpapers = listWallpapers();
+        // Shows when there are no photos at all: a quiet dark gradient instead of flat black.
+        root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                new int[]{0xFF1C2230, 0xFF10131A, 0xFF07080B}));
 
         glow = new View(this);
         root.addView(glow, new FrameLayout.LayoutParams(-1, -1));
@@ -236,6 +258,12 @@ public class MainActivity extends Activity {
         bottom.setClipChildren(false);
         bottom.setClipToPadding(false);
         hero.addView(bottom, lp(-1, -2, Gravity.BOTTOM, dp(48), 0, dp(48), dp(30)));
+
+        // Photo arrows at the screen edges, centred on the open area above the dock.
+        prevArrow = photoArrow("‹", -1);
+        nextArrow = photoArrow("›", 1);
+        hero.addView(prevArrow, lp(dp(44), dp(44), Gravity.START | Gravity.CENTER_VERTICAL, dp(14), 0, 0, dp(24)));
+        hero.addView(nextArrow, lp(dp(44), dp(44), Gravity.END | Gravity.CENTER_VERTICAL, 0, 0, dp(14), dp(24)));
 
         title = text(34, "sans-serif-light", Color.WHITE);
         title.setShadowLayer(dp(18), 0, 0, 0x66000000);
@@ -305,14 +333,51 @@ public class MainActivity extends Activity {
         inputs.setOnClickListener(v -> showInputs(v));
         wifiPill = pill("Wi-Fi", "◉");
         wifiPill.setOnClickListener(v -> launch(new Intent(Settings.ACTION_WIFI_SETTINGS)));
+        TextView clean = pill("Clean up", "✦");
+        clean.setOnClickListener(v -> cleanUp((TextView) v));
         TextView settings = pill("Settings", "⚙");
         settings.setOnClickListener(v -> launch(new Intent(Settings.ACTION_SETTINGS)));
-        for (TextView p : new TextView[]{inputs, wifiPill, settings}) {
+        for (TextView p : new TextView[]{inputs, wifiPill, clean, settings}) {
             right.addView(p, llp(-2, dp(30), dp(10), 0, 0, 0));
             pills.add(p);
         }
         header.addView(right, new FrameLayout.LayoutParams(-2, -2, Gravity.END | Gravity.TOP));
         return header;
+    }
+
+    private TextView prevArrow, nextArrow;
+
+    /** Round ‹ / › button that swipes the slideshow; stays focused so you can keep pressing OK. */
+    private TextView photoArrow(String glyph, int step) {
+        TextView a = text(24, "sans-serif-light", 0xCCFFFFFF);
+        a.setText(glyph);
+        a.setGravity(Gravity.CENTER);
+        a.setIncludeFontPadding(false);
+        a.setPadding(0, 0, 0, dp(3)); // the glyphs sit low in the font
+        a.setFocusable(true);
+        a.setId(View.generateViewId());
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(0x40000000);
+        bg.setStroke(dp(1), 0x33FFFFFF);
+        a.setBackground(bg);
+        a.setOnClickListener(v -> stepWallpaper(step, true));
+        a.setOnFocusChangeListener((v, has) -> {
+            bg.setColor(has ? 0xF2FFFFFF : 0x40000000);
+            a.setTextColor(has ? 0xFF111111 : 0xCCFFFFFF);
+            v.animate().scaleX(has ? 1.12f : 1f).scaleY(has ? 1.12f : 1f)
+                    .setInterpolator(new OvershootInterpolator(2f)).setDuration(220).start();
+            // Hide the app-colour glow so the photo shows true; not fadeGlow(), which also dims for the grid.
+            if (has) { scroll.smoothScrollTo(0, 0); glow.animate().alpha(0f).setDuration(300).start(); showPhotoTitle(); }
+        });
+        return a;
+    }
+
+    /** "Photo 3 of 12" in the title spot while an arrow has focus. */
+    private void showPhotoTitle() {
+        if (wallpapers.length == 0) return;
+        title.setText("Photo " + (Math.max(0, wallIndex) + 1) + " of " + wallpapers.length);
+        title.animate().alpha(1f).setDuration(200).start();
     }
 
     private TextView pill(String label, String glyph) {
@@ -335,6 +400,76 @@ public class MainActivity extends Activity {
             if (has) { lastFocusedId = v.getId(); scroll.smoothScrollTo(0, 0); fadeGlow(1f); }
         });
         return p;
+    }
+
+    // ---------------------------------------------------------------- clean up
+
+    private volatile boolean cleaning;
+
+    /**
+     * Force-stop every running app except the keep list and anything playing audio, then show what it
+     * freed. Android 14 won't let an app stop other apps, so this goes through the TV's own ADB.
+     */
+    private void cleanUp(TextView pill) {
+        if (cleaning) return;
+        cleaning = true;
+        pill.setText("✦  Cleaning…");
+        ActivityManager am = (ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        Set<String> targets = new HashSet<>();
+        Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        for (ResolveInfo r : getPackageManager().queryIntentActivities(q, 0)) targets.add(r.activityInfo.packageName);
+        targets.addAll(Arrays.asList(getResources().getStringArray(R.array.cleanup_extra)));
+        targets.removeAll(Arrays.asList(getResources().getStringArray(R.array.cleanup_keep)));
+        targets.remove(getPackageName());
+        long before = availMb(am);
+        new Thread(() -> {
+            String result;
+            try (Adb adb = Adb.connect(this, 5555, () -> runOnUiThread(() -> pill.setText("✦  Press Allow on the TV")))) {
+                runOnUiThread(() -> pill.setText("✦  Cleaning…"));
+                Set<String> running = new HashSet<>();
+                for (String line : adb.shell("ps -A -o NAME").split("\n")) {
+                    String name = line.trim();
+                    int colon = name.indexOf(':');
+                    running.add(colon > 0 ? name.substring(0, colon) : name);
+                }
+                Set<String> playing = playingPackages(adb.shell("dumpsys media_session"));
+                int closed = 0;
+                for (String p : targets) {
+                    if (!running.contains(p) || playing.contains(p)) continue;
+                    adb.shell("am force-stop " + p);
+                    closed++;
+                }
+                SystemClock.sleep(1000);
+                result = "✓  " + closed + " closed · " + Math.max(0, availMb(am) - before) + " MB";
+            } catch (java.net.ConnectException e) {
+                result = "✕  Turn on USB debugging"; // nothing listening on 5555
+            } catch (Exception e) {
+                result = "✕  Couldn't clean up";
+            }
+            String shown = result;
+            runOnUiThread(() -> {
+                pill.setText(shown);
+                handler.postDelayed(() -> { pill.setText("✦  Clean up"); cleaning = false; }, 3000);
+            });
+        }, "cleanup").start();
+    }
+
+    /** Packages with a media session that's currently playing (e.g. music in the background). */
+    private static Set<String> playingPackages(String dump) {
+        Set<String> playing = new HashSet<>();
+        String pkg = null;
+        for (String line : dump.split("\n")) {
+            line = line.trim();
+            if (line.startsWith("package=")) pkg = line.substring(8);
+            else if (pkg != null && line.startsWith("state=PlaybackState") && line.contains("PLAYING")) playing.add(pkg);
+        }
+        return playing;
+    }
+
+    private static long availMb(ActivityManager am) {
+        ActivityManager.MemoryInfo mi = new ActivityManager.MemoryInfo();
+        am.getMemoryInfo(mi);
+        return mi.availMem / (1024 * 1024);
     }
 
     // ---------------------------------------------------------------- apps
@@ -506,6 +641,20 @@ public class MainActivity extends Activity {
             c.setNextFocusRightId(i == d - 1 ? c.getId() : dockCards.get(i + 1).getId());
             c.setNextFocusDownId(g > 0 ? gridCards.get(Math.min(i, g - 1)).getId() : c.getId());
         }
+        // Left of the first dock app is the ‹ photo arrow, right of the last is ›.
+        if (d > 0) {
+            int first = dockCards.get(0).getId(), last = dockCards.get(d - 1).getId();
+            dockCards.get(0).setNextFocusLeftId(prevArrow.getId());
+            dockCards.get(d - 1).setNextFocusRightId(nextArrow.getId());
+            prevArrow.setNextFocusRightId(first);
+            prevArrow.setNextFocusDownId(first);
+            prevArrow.setNextFocusLeftId(prevArrow.getId());
+            prevArrow.setNextFocusUpId(topId);
+            nextArrow.setNextFocusLeftId(last);
+            nextArrow.setNextFocusDownId(last);
+            nextArrow.setNextFocusRightId(nextArrow.getId());
+            nextArrow.setNextFocusUpId(pills.get(pills.size() - 1).getId());
+        }
         int lastRow = (g - 1) / cols;
         for (int j = 0; j < g; j++) {
             View c = gridCards.get(j);
@@ -668,30 +817,129 @@ public class MainActivity extends Activity {
         return v;
     }
 
-    /** Decode the next photo off the main thread, then crossfade it in over the current one. */
-    private void nextWallpaper() {
-        handler.removeCallbacks(rotateWallpaper);
-        if (wallpapers.length == 0) return;
-        if (wallIndex < 0) wallIndex = getPreferences(MODE_PRIVATE).getInt("wallpaper", -1);
-        wallIndex = (wallIndex + 1) % wallpapers.length;
-        getPreferences(MODE_PRIVATE).edit().putInt("wallpaper", wallIndex).apply();
-        wallChangedAt = SystemClock.elapsedRealtime();
-        String name = "wallpapers/" + wallpapers[wallIndex];
-        new Thread(() -> {
-            Bitmap bm = null;
-            try (java.io.InputStream in = getAssets().open(name)) {
-                BitmapFactory.Options o = new BitmapFactory.Options();
-                o.inPreferredConfig = Bitmap.Config.RGB_565;
-                bm = BitmapFactory.decodeStream(in, null, o);
+    /** The photo folder on the TV. Anything in it replaces the bundled nature photos. */
+    static final File WALL_DIR = new File(
+            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "Wallpapers");
+
+    /** Photos in the TV's Pictures/Wallpapers folder, sorted by name; the bundled ones if it has none. */
+    private String[] listWallpapers() {
+        List<String> found = new ArrayList<>();
+        File[] files = WALL_DIR.listFiles();
+        if (files != null) for (File f : files) {
+            String n = f.getName().toLowerCase(Locale.ROOT);
+            if (f.isFile() && !n.startsWith(".") && (n.endsWith(".jpg") || n.endsWith(".jpeg")
+                    || n.endsWith(".png") || n.endsWith(".webp") || n.endsWith(".heic"))) found.add(f.getPath());
+        }
+        if (found.isEmpty()) {
+            try {
+                String[] bundled = getAssets().list("wallpapers");
+                if (bundled != null) for (String n : bundled) found.add("asset:wallpapers/" + n);
             } catch (java.io.IOException ignored) { }
-            Bitmap result = bm;
-            runOnUiThread(() -> showWallpaper(result));
-        }).start();
-        scheduleWallpaper(WALLPAPER_INTERVAL_MS);
+        }
+        Collections.sort(found);
+        return found.toArray(new String[0]);
     }
 
-    private void showWallpaper(Bitmap bm) {
+    private void nextWallpaper() {
+        stepWallpaper(1, false);
+    }
+
+    private int wallSeq;
+
+    /**
+     * Decode the photo {@code step} places away off the main thread, then crossfade it in over the current
+     * one. Manual swipes (the arrows) fade quickly; only the latest of several quick presses is shown.
+     */
+    private void stepWallpaper(int step, boolean manual) {
+        handler.removeCallbacks(rotateWallpaper);
+        wallpapers = listWallpapers(); // pick up photos added to the folder since last time
+        if (wallpapers.length == 0) return;
+        if (wallIndex < 0) wallIndex = getPreferences(MODE_PRIVATE).getInt("wallpaper", -1);
+        int n = wallpapers.length;
+        wallIndex = ((wallIndex + step) % n + n) % n;
+        getPreferences(MODE_PRIVATE).edit().putInt("wallpaper", wallIndex).apply();
+        wallChangedAt = SystemClock.elapsedRealtime();
+        if (prevArrow.hasFocus() || nextArrow.hasFocus()) showPhotoTitle();
+        String path = wallpapers[wallIndex];
+        int seq = ++wallSeq;
+        int sw = getResources().getDisplayMetrics().widthPixels, sh = getResources().getDisplayMetrics().heightPixels;
+        new Thread(() -> {
+            Bitmap result = null;
+            try {
+                result = loadWallpaper(path, sw, sh);
+            } catch (Exception | OutOfMemoryError ignored) { }
+            Bitmap shown = result;
+            runOnUiThread(() -> { if (seq == wallSeq) showWallpaper(shown, manual); });
+        }).start();
+        scheduleWallpaper(wallpaperIntervalMs);
+    }
+
+    private java.io.InputStream openWallpaper(String path) throws java.io.IOException {
+        return path.startsWith("asset:") ? getAssets().open(path.substring(6)) : new java.io.FileInputStream(path);
+    }
+
+    /**
+     * Decode a photo at roughly screen size (phone photos are 12+ MP; the TV has 1 GB), upright per its
+     * EXIF, and screen-shaped: a portrait or odd-shaped photo is shown whole over a blurred copy of itself.
+     */
+    private Bitmap loadWallpaper(String path, int sw, int sh) throws java.io.IOException {
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        try (java.io.InputStream in = openWallpaper(path)) { BitmapFactory.decodeStream(in, null, o); }
+        if (o.outWidth <= 0 || o.outHeight <= 0) return null;
+        int rotation = 0;
+        try (java.io.InputStream in = openWallpaper(path)) {
+            switch (new ExifInterface(in).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+                case ExifInterface.ORIENTATION_ROTATE_90: rotation = 90; break;
+                case ExifInterface.ORIENTATION_ROTATE_180: rotation = 180; break;
+                case ExifInterface.ORIENTATION_ROTATE_270: rotation = 270; break;
+                default: break;
+            }
+        } catch (Exception ignored) { } // no or unreadable EXIF: show as stored
+        boolean sideways = rotation == 90 || rotation == 270;
+        int w = sideways ? o.outHeight : o.outWidth, h = sideways ? o.outWidth : o.outHeight;
+        int sample = 1;
+        while (w / (sample * 2) >= sw && h / (sample * 2) >= sh) sample *= 2;
+        BitmapFactory.Options d = new BitmapFactory.Options();
+        d.inSampleSize = sample;
+        d.inPreferredConfig = Bitmap.Config.RGB_565;
+        Bitmap bm;
+        try (java.io.InputStream in = openWallpaper(path)) { bm = BitmapFactory.decodeStream(in, null, d); }
+        if (bm == null) return null;
+        if (rotation != 0) {
+            Matrix m = new Matrix();
+            m.postRotate(rotation);
+            Bitmap r = Bitmap.createBitmap(bm, 0, 0, bm.getWidth(), bm.getHeight(), m, true);
+            if (r != bm) bm.recycle();
+            bm = r;
+        }
+        float photo = (float) bm.getWidth() / bm.getHeight(), screen = (float) sw / sh;
+        if (Math.abs(photo - screen) / screen < 0.2f) return bm; // close enough: CENTER_CROP fills the screen
+
+        Bitmap out = Bitmap.createBitmap(sw, sh, Bitmap.Config.RGB_565);
+        Canvas c = new Canvas(out);
+        Paint p = new Paint(Paint.FILTER_BITMAP_FLAG);
+        // Background: the same photo, cover-scaled, blurred by shrinking it to a few dozen pixels, darkened.
+        float cover = Math.max((float) sw / bm.getWidth(), (float) sh / bm.getHeight());
+        int tw = Math.max(1, bm.getWidth() / 40), th = Math.max(1, bm.getHeight() / 40);
+        Bitmap tiny = Bitmap.createScaledBitmap(bm, tw, th, true);
+        float bw = bm.getWidth() * cover, bh = bm.getHeight() * cover;
+        c.drawBitmap(tiny, null, new RectF((sw - bw) / 2, (sh - bh) / 2, (sw + bw) / 2, (sh + bh) / 2), p);
+        tiny.recycle();
+        c.drawColor(0x73000000);
+        // Foreground: the whole photo, fitted.
+        float fit = Math.min((float) sw / bm.getWidth(), (float) sh / bm.getHeight());
+        float fw = bm.getWidth() * fit, fh = bm.getHeight() * fit;
+        c.drawBitmap(bm, null, new RectF((sw - fw) / 2, (sh - fh) / 2, (sw + fw) / 2, (sh + fh) / 2), p);
+        bm.recycle();
+        return out;
+    }
+
+    private void showWallpaper(Bitmap bm, boolean fast) {
         if (bm == null || isDestroyed()) return;
+        // A fade still running (quick presses): settle it, so its end action doesn't clear the new back layer.
+        wallFront.animate().cancel();
+        wallFront.setAlpha(1f);
         // Swap roles: the old front becomes the back, the new photo fades in on top.
         ImageView old = wallFront;
         wallFront = wallBack;
@@ -701,7 +949,7 @@ public class MainActivity extends Activity {
         root.addView(wallFront, 1, new FrameLayout.LayoutParams(-1, -1));
         wallFront.setImageBitmap(bm);
         wallFront.setAlpha(0f);
-        wallFront.animate().alpha(1f).setDuration(firstWallpaper ? 600 : 2000).withEndAction(() -> {
+        wallFront.animate().alpha(1f).setDuration(fast ? 350 : firstWallpaper ? 600 : 2000).withEndAction(() -> {
             wallBack.setImageDrawable(null); // release the previous photo
         }).start();
         firstWallpaper = false;
@@ -828,6 +1076,14 @@ public class MainActivity extends Activity {
         // Menu key on the remote opens the Inputs dropdown.
         if (e.getKeyCode() == KeyEvent.KEYCODE_MENU && e.getAction() == KeyEvent.ACTION_UP && !pills.isEmpty()) {
             showInputs(pills.get(0));
+            return true;
+        }
+        // Remotes with media keys can swipe photos from anywhere on the home screen.
+        int k = e.getKeyCode();
+        int step = k == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || k == KeyEvent.KEYCODE_MEDIA_NEXT ? 1
+                : k == KeyEvent.KEYCODE_MEDIA_REWIND || k == KeyEvent.KEYCODE_MEDIA_PREVIOUS ? -1 : 0;
+        if (step != 0) {
+            if (e.getAction() == KeyEvent.ACTION_UP) stepWallpaper(step, true);
             return true;
         }
         return super.dispatchKeyEvent(e);

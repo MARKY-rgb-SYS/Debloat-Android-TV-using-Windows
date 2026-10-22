@@ -6,28 +6,44 @@
 <resources>
     <!-- Dock apps, left to right. Apps that aren't installed are skipped. -->
     <string-array name="dock_apps">
-        <item>com.apple.atve.androidtv.appletv</item>
-        <item>com.google.android.youtube.tv</item>
-        <item>in.startv.hotstar</item>
+        <item>com.crunchyroll.crunchyroid</item>
+        <item>com.amarullz.androidtv.animetvjmto</item>
         <item>com.netflix.ninja</item>
-        <item>com.amazon.amazonvideo.livingroom</item>
+        <item>com.google.android.youtube.tv</item>
+        <item>com.stremio.one</item>
+        <item>com.apple.atve.androidtv.appletv</item>
     </string-array>
 
     <!-- Never shown as tiles: system helpers, and the Live TV app (it's in the Inputs menu). -->
     <string-array name="hidden_apps">
-        <item>com.tcl.tv</item>
-        <item>com.tcl.suspension</item>
-        <item>com.tcl.t_solo</item>
-        <item>com.tcl.dashboard</item>
+        <item>com.mitv.livetv</item>
+        <item>com.android.tv.settings</item>
     </string-array>
 
     <!-- The TV's Live TV / tuner app, listed last in the Inputs menu. Empty to leave it out.
          Common ones: com.tcl.tv (TCL), com.mediatek.wwtv.tvcenter (Xiaomi, many MediaTek sets),
          com.google.android.tv (Google Live Channels), com.sony.dtv.tvx (Sony). -->
-    <string name="live_tv_package" translatable="false">com.tcl.tv</string>
+    <string name="live_tv_package" translatable="false">com.mitv.livetv</string>
 
     <!-- The manufacturer's own source picker, used if switching to an input directly fails. -->
-    <string name="input_picker_package" translatable="false">com.tcl.suspension</string>
+    <string name="input_picker_package" translatable="false">com.mitv.livetv</string>
+
+    <!-- "Clean up" pill: force-stops every running app on the home screen, plus these. Apps playing
+         audio are always skipped. System services (Google, voice search, casting) are never touched. -->
+    <string-array name="cleanup_extra">
+        <item>com.google.android.apps.tv.dreamx</item>
+    </string-array>
+
+    <!-- ...except these, which need to stay running: app updates, settings, the TV tuner/inputs, mirroring. -->
+    <string-array name="cleanup_keep">
+        <item>com.android.vending</item>
+        <item>com.android.tv.settings</item>
+        <item>com.mitv.livetv</item>
+        <item>com.xiaomi.mitv.smartshare</item>
+    </string-array>
+
+    <!-- Minutes between slideshow photos. -->
+    <integer name="wallpaper_minutes">1</integer>
 
     <!-- Tiles per row in the grid. -->
     <integer name="columns">5</integer>

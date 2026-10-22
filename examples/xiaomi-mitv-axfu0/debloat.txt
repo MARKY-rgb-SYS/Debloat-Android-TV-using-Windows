@@ -1,0 +1,23 @@
+# Xiaomi Mi TV (MiTV-AXFU0, device arctictale), Google TV, Android 14, build UKG3.241124.001.V816.0.25.12.5.UXFAATV
+# Apply: tools/disable.sh examples/xiaomi-mitv-axfu0/debloat.txt   Undo: tools/restore.sh <same file>
+# Everything is DISABLED for user 0, never uninstalled.
+# Answers here: kept Chromecast, mirroring, Live TV, USB media, voice search, updates, YouTube Music,
+# Mi TV+ and the ambient screensaver.
+
+# Xiaomi telemetry
+com.miui.tv.analytics                        # Mi TV analytics
+com.xiaomi.statistic                         # Xiaomi statistics upload
+
+# Xiaomi ads and promo rows
+com.mitv.tvhome.oemtab                       # Xiaomi promo tab in the Google TV home
+com.mitv.tvhome.michannel                    # "Mi Channel" recommendation rows (also registers a HOME activity)
+com.xiaomi.android.tvsetup.partnercustomizer # partner app rows / promos for the stock launcher
+com.xm.webcontent                            # Xiaomi web promo pages
+
+# Junk
+com.xiaomi.mitv.tvmanager                    # "TV Manager" booster/cleaner, Firebase tracking
+com.google.android.feedback
+com.google.android.play.games
+
+# Preinstalled apps this household didn't use
+com.amazon.amazonvideo.livingroom            # Prime Video

@@ -44,6 +44,37 @@ launcher/build-and-install.sh                               # build + install th
 
 Undo everything with `tools/restore.sh <the same list>`.
 
+## Do it by hand (Windows)
+
+Tested on a Xiaomi Mi TV (MiTV-AXFU0, Google TV, Android 14). Needs Git for Windows (Git Bash).
+
+1. Unzip Google's [platform-tools for Windows](https://developer.android.com/tools/releases/platform-tools)
+   into `platform-tools/`, and put the TV's IP in `tools/.tv_host`.
+2. For the launcher build, unzip a JDK 17 into `../toolchain/jdk17` and the Android command-line tools into
+   `../toolchain/sdk/cmdline-tools/latest`, then install `platforms;android-34` and `build-tools;34.0.0`
+   with `sdkmanager`. (If your user folder has a space in it, call `sdkmanager.bat` via its 8.3 short path.)
+3. Debloat with your list (see `examples/xiaomi-mitv-axfu0/`), then `bash launcher/build-and-install-win.sh`.
+
+| Script | What it does |
+|---|---|
+| `launcher/build-and-install-win.sh` | Build + install the launcher (`WALLPAPERS=0` for a plain dark background) |
+| `restore-tv.cmd` | Undo everything: re-enable what the backup says was enabled, stock launcher back (`-RemoveLauncher` to uninstall) |
+| `sync-wallpapers.cmd` | Copy the photos in `../TV Wallpapers` to the TV's `Pictures/Wallpapers` slideshow folder |
+
+Extras in this version of the launcher:
+
+- **Your own photos.** The slideshow plays whatever is in `Pictures/Wallpapers` on the TV (falls back to the
+  bundled nature photos). Phone photos are downscaled, turned upright from EXIF, and portrait shots are shown
+  whole over a blurred copy. Interval in `config.xml` (`wallpaper_minutes`, default 1).
+- **‹ › photo arrows**: Left from the first dock app or Right from the last; rewind/fast-forward keys work too.
+- **Clean up** pill: force-stops background apps (Stremio's server, etc.) except the `cleanup_keep` list and
+  anything playing audio. Android 14 doesn't let apps do this, so the launcher talks to the TV's own ADB on
+  127.0.0.1; the first press shows "Allow USB debugging?" for its key. Needs USB debugging left on.
+
+Windows gotchas: `javac` needs `-encoding UTF-8`; `aapt2 -A` stores assets with backslashes (Android can't
+list them), so the script adds them with `jar`; Windows PowerShell drops embedded double quotes when calling
+`adb`; on Android 14 the photo folder needs `READ_MEDIA_IMAGES` granted, not just `READ_EXTERNAL_STORAGE`.
+
 ## What's here
 
 | Path | What it is |
